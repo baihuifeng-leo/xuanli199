@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import {
   buildMessages,
@@ -7,6 +10,7 @@ import {
   diffWeekly,
   parseWeekly,
 } from './weekly-rocketchat-lib.mjs';
+import { main, readState, writeStateAtomic } from './weekly-rocketchat.mjs';
 
 const makeWeekly = (entries) => ({
   issue: '119',
@@ -88,4 +92,74 @@ test('buildMessages splits only between entries and marks every part with the co
   assert.ok(messages.every((message) => message.length <= 420));
   assert.ok(messages.every((message) => !message.endsWith('https://')));
   assert.deepEqual(messages.flatMap((message) => [...message.matchAll(/https:\/\/example\.com\/(\d+)/g)].map((match) => match[1])).sort(), ['1', '2', '3', '4', '5', '6', '7']);
+});
+
+test('first normal run creates a baseline without messages', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'weekly-state-'));
+  const stateFile = join(directory, 'state.json');
+  const sent = [];
+  try {
+    const result = await main(['--repo', directory, '--state-file', stateFile], {
+      fetchUpstream: async () => {},
+      resolveHead: async () => 'a'.repeat(40),
+      collectChanges: async () => { throw new Error('must not collect on baseline'); },
+      sendMessages: async (messages) => sent.push(...messages),
+      log: () => {},
+    });
+    assert.equal(result.mode, 'baseline-created');
+    assert.deepEqual(sent, []);
+    assert.equal((await readState(stateFile)).lastSuccessfulCommit, 'a'.repeat(40));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('a non-ancestor cursor fails without replacing state', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'weekly-state-'));
+  const stateFile = join(directory, 'state.json');
+  const orphan = 'b'.repeat(40);
+  try {
+    await writeStateAtomic(stateFile, { schemaVersion: 1, lastSuccessfulCommit: orphan, updatedAt: '2026-09-22T00:00:00.000Z' });
+    await assert.rejects(() => main(['--repo', directory, '--state-file', stateFile], {
+      fetchUpstream: async () => {},
+      resolveHead: async () => 'c'.repeat(40),
+      collectChanges: async () => { throw new Error('lastSuccessfulCommit is not an ancestor of upstream/main'); },
+      sendMessages: async () => {},
+      log: () => {},
+    }), /not an ancestor/);
+    assert.equal((await readState(stateFile)).lastSuccessfulCommit, orphan);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('dry-run and README-only changes do not advance state', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'weekly-state-'));
+  const stateFile = join(directory, 'state.json');
+  const oldHead = 'd'.repeat(40);
+  await writeFile(stateFile, JSON.stringify({ schemaVersion: 1, lastSuccessfulCommit: oldHead, updatedAt: '2026-09-22T00:00:00.000Z' }));
+  try {
+    const result = await main(['--repo', directory, '--state-file', stateFile, '--dry-run'], {
+      fetchUpstream: async () => {},
+      resolveHead: async () => 'e'.repeat(40),
+      collectChanges: async () => [],
+      sendMessages: async () => { throw new Error('dry-run must not send'); },
+      log: () => {},
+    });
+    assert.equal(result.mode, 'dry-run');
+    assert.equal((await readState(stateFile)).lastSuccessfulCommit, oldHead);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('readState rejects malformed state', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'weekly-state-'));
+  const stateFile = join(directory, 'state.json');
+  try {
+    await writeFile(stateFile, '{bad json');
+    await assert.rejects(() => readState(stateFile), /Invalid state file/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
