@@ -13,6 +13,33 @@ import {
 
 const REPOSITORY_URL = 'https://github.com/xuanli199/weekly';
 
+export async function postWebhook(url, text, { fetchImpl = fetch, timeoutMs = 15_000 } = {}) {
+  if (!url) throw new Error('ROCKETCHAT_WEBHOOK_URL is required');
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    throw new Error(`Rocket.Chat request failed: ${error.name === 'AbortError' || error.name === 'TimeoutError' ? 'timeout' : error.message}`);
+  }
+  const raw = await response.text();
+  let payload = null;
+  try { payload = raw ? JSON.parse(raw) : null; } catch { /* A successful non-JSON response is acceptable. */ }
+  if (!response.ok || payload?.success === false) {
+    const detail = String(payload?.error ?? payload?.message ?? `HTTP ${response.status}`).slice(0, 200);
+    throw new Error(`Rocket.Chat rejected message: ${detail}`);
+  }
+  return payload;
+}
+
+export async function sendMessages(messages, { url = process.env.ROCKETCHAT_WEBHOOK_URL, post = postWebhook } = {}) {
+  for (const message of messages) await post(url, message);
+}
+
 export async function runGit(args, { cwd, spawn = nodeSpawn, allowFailure = false } = {}) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -113,14 +140,18 @@ const productionDeps = {
   fetchUpstream: async (repo) => { await runGit(['fetch', '--quiet', 'upstream', 'main'], { cwd: repo }); },
   resolveHead: async (repo) => (await runGit(['rev-parse', 'upstream/main'], { cwd: repo })).stdout.trim(),
   collectChanges,
-  sendMessages: async () => { throw new Error('Webhook delivery is not implemented'); },
+  sendMessages,
   log: console.log,
 };
 
 export async function main(argv = process.argv.slice(2), dependencies = {}) {
   const deps = { ...productionDeps, ...dependencies };
   const options = parseArgs(argv);
-  if (options.testWebhook) throw new Error('Webhook delivery is not implemented');
+  if (options.testWebhook) {
+    await deps.sendMessages([`【每周科技补全】自动推送链路测试\n时间：${new Date().toISOString()}`]);
+    deps.log('Rocket.Chat test message sent');
+    return { mode: 'test-webhook' };
+  }
   await deps.fetchUpstream(options.repo);
   const head = await deps.resolveHead(options.repo);
   const state = await readState(options.stateFile);

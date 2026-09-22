@@ -10,7 +10,7 @@ import {
   diffWeekly,
   parseWeekly,
 } from './weekly-rocketchat-lib.mjs';
-import { main, readState, writeStateAtomic } from './weekly-rocketchat.mjs';
+import { main, postWebhook, readState, sendMessages, writeStateAtomic } from './weekly-rocketchat.mjs';
 
 const makeWeekly = (entries) => ({
   issue: '119',
@@ -162,4 +162,40 @@ test('readState rejects malformed state', async () => {
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('HTTP 200 with success false is rejected without exposing URL', async () => {
+  const secretUrl = 'https://chat.invalid/hooks/integration/SECRET';
+  await assert.rejects(
+    () => postWebhook(secretUrl, 'test', {
+      fetchImpl: async () => new Response(JSON.stringify({ success: false, error: 'rejected' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    }),
+    (error) => error.message.includes('rejected') && !error.message.includes('SECRET'),
+  );
+});
+
+test('sendMessages stops after a failure', async () => {
+  let calls = 0;
+  await assert.rejects(() => sendMessages(['one', 'two', 'three'], {
+    url: 'https://chat.invalid/hooks/id/token',
+    post: async () => {
+      calls += 1;
+      if (calls === 2) throw new Error('503');
+    },
+  }), /503/);
+  assert.equal(calls, 2);
+});
+
+test('test-webhook sends fixed text without reading state', async () => {
+  const sent = [];
+  const result = await main(['--test-webhook'], {
+    sendMessages: async (messages) => sent.push(...messages),
+    log: () => {},
+  });
+  assert.equal(result.mode, 'test-webhook');
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /自动推送链路测试/);
 });
