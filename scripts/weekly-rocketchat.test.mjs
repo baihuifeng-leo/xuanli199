@@ -199,3 +199,14 @@ test('test-webhook sends fixed text without reading state', async () => {
   assert.equal(sent.length, 1);
   assert.match(sent[0], /自动推送链路测试/);
 });
+
+test('systemd units enforce schedule, paths, and hardening', async () => {
+  const service = await readFile(new URL('../deploy/weekly-rocketchat.service', import.meta.url), 'utf8');
+  const timer = await readFile(new URL('../deploy/weekly-rocketchat.timer', import.meta.url), 'utf8');
+  assert.match(service, /Type=oneshot/);
+  assert.match(service, /EnvironmentFile=\/etc\/weekly-rocketchat\.env/);
+  assert.match(service, /--state-file \/var\/lib\/weekly-rocketchat\/state\.json/);
+  assert.match(service, /NoNewPrivileges=true/);
+  assert.match(timer, /OnCalendar=\*-\*-\* 09:00:00 Asia\/Shanghai/);
+  assert.match(timer, /Persistent=true/);
+});

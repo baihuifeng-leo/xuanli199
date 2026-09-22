@@ -2,6 +2,39 @@
 
 本项目是[玄离199](https://space.bilibili.com/67079745)每周科技补全视频中提到的软件和开源项目总结，方便观众收藏和搜索。文档内容来自视频文稿，所以部分内容直接读起来会比较奇怪，建议配合视频观看。
 
+## Rocket.Chat 增量推送
+
+本 fork 包含一个无运行时第三方依赖的推送程序。它每天检查 `upstream/main`，仅将新增或修订的
+`docs/<期数>.md` 摘要发送到 Rocket.Chat；它不会抓取新闻，也不会合并或推送 Git 分支。
+
+私密配置放在 `/etc/weekly-rocketchat.env`，不要写入仓库：
+
+```sh
+ROCKETCHAT_WEBHOOK_URL=https://chat.example.com/hooks/INTEGRATION_ID/TOKEN
+```
+
+推荐以专用系统用户运行，状态目录为 `/var/lib/weekly-rocketchat`。安装前确认 `command -v node` 为
+`/usr/bin/node`，然后复制 `deploy/weekly-rocketchat.{service,timer}` 到 `/etc/systemd/system/`。首次部署：
+
+```sh
+node scripts/weekly-rocketchat.mjs --repo "$PWD" --state-file /var/lib/weekly-rocketchat/state.json --init-baseline
+node scripts/weekly-rocketchat.mjs --test-webhook
+systemctl daemon-reload
+systemctl enable --now weekly-rocketchat.timer
+systemctl list-timers weekly-rocketchat.timer --all
+```
+
+定时器按北京时间每天 09:00 运行；服务器错过时间后会补跑，无内容变化时不发消息。诊断可用
+`journalctl -u weekly-rocketchat.service`。预览增量但不发送、不推进状态：
+
+```sh
+node scripts/weekly-rocketchat.mjs --repo "$PWD" --state-file /var/lib/weekly-rocketchat/state.json --dry-run
+```
+
+轮换 Webhook 时只替换 env 文件并重新运行 `--test-webhook`。卸载时先执行
+`systemctl disable --now weekly-rocketchat.timer`，再删除两个 unit、env 和状态目录；删除 env 会永久移除
+本机保存的 Webhook 密钥。
+
 静态博客版：<https://xuanli199.github.io/weekly/>
 
 飞书版：<https://zi0953ehkw.feishu.cn/wiki/TOHawcRzricMQ3kr6lmc7x8nnGc>
