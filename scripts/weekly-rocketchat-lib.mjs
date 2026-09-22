@@ -9,10 +9,12 @@ export function parseWeekly(markdown, sourcePath) {
   if (!pathMatch) throw new Error(`Invalid weekly path: ${sourcePath}`);
 
   const normalized = normalizeText(markdown);
-  const headingMatch = normalized.match(/^#\s+(.+)$/m);
+  if (/^#[ \t]*$/m.test(normalized)) throw new Error(`Missing weekly title in ${sourcePath}`);
+  if (/^##[ \t]*$/m.test(normalized)) throw new Error(`Invalid weekly entry in ${sourcePath}`);
+  const headingMatch = normalized.match(/^#[ \t]+([^\r\n]+)$/m);
   if (!headingMatch) throw new Error(`Missing weekly title in ${sourcePath}`);
 
-  const sections = [...normalized.matchAll(/^##\s+(.+)$/gm)];
+  const sections = [...normalized.matchAll(/^##[ \t]+([^\r\n]+)$/gm)];
   if (sections.length === 0) throw new Error(`Missing weekly entries in ${sourcePath}`);
 
   const entries = sections.map((match, index) => {
@@ -49,10 +51,11 @@ export function classifyChangedPaths(nameStatusText) {
     if (!line) continue;
     const [rawStatus, firstPath, secondPath] = line.split('\t');
     const status = rawStatus[0];
-    const path = status === 'R' || status === 'C' ? secondPath : firstPath;
-    const oldPath = status === 'R' || status === 'C' ? firstPath : null;
-    if (WEEKLY_PATH.test(path ?? '') || (oldPath && WEEKLY_PATH.test(oldPath))) {
-      result.push({ status, path, oldPath });
+    if (status === 'R' || status === 'C') {
+      if (WEEKLY_PATH.test(firstPath ?? '')) result.push({ status: 'D', path: firstPath, oldPath: null });
+      if (WEEKLY_PATH.test(secondPath ?? '')) result.push({ status: 'A', path: secondPath, oldPath: null });
+    } else if (WEEKLY_PATH.test(firstPath ?? '')) {
+      result.push({ status, path: firstPath, oldPath: null });
     }
   }
   return result;
@@ -139,8 +142,8 @@ function packBlocks(blocks, maxLength, assumedParts, shortCommit) {
 function shortenBlock(block, budget) {
   if (block.length <= budget) return block;
   const lines = block.split('\n');
-  const url = lines.at(-1)?.startsWith('http') ? lines.pop() : '';
-  const fixed = `${lines[0]}\n（简介过长，已省略）${url ? `\n${url}` : ''}`;
+  const urls = lines.filter((line) => line.startsWith('http'));
+  const fixed = `${lines[0]}\n（简介过长，已省略）${urls.length ? `\n${urls.join('\n')}` : ''}`;
   if (fixed.length > budget) throw new Error('A weekly entry cannot fit within maxLength');
   return fixed;
 }

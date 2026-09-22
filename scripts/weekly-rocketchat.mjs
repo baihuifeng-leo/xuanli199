@@ -13,6 +13,17 @@ import {
 
 const REPOSITORY_URL = 'https://github.com/xuanli199/weekly';
 
+function sanitizeError(value, webhookUrl) {
+  let safe = String(value ?? 'unknown error').replace(/https?:\/\/[^\s"']+/gi, '[redacted-url]');
+  try {
+    const parsed = new URL(webhookUrl);
+    for (const segment of parsed.pathname.split('/').filter(Boolean)) {
+      if (segment.length >= 6) safe = safe.replaceAll(segment, '[redacted]');
+    }
+  } catch { /* URL validation is reported separately by fetch. */ }
+  return safe.slice(0, 200);
+}
+
 export async function postWebhook(url, text, { fetchImpl = fetch, timeoutMs = 15_000 } = {}) {
   if (!url) throw new Error('ROCKETCHAT_WEBHOOK_URL is required');
   let response;
@@ -24,13 +35,13 @@ export async function postWebhook(url, text, { fetchImpl = fetch, timeoutMs = 15
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
-    throw new Error(`Rocket.Chat request failed: ${error.name === 'AbortError' || error.name === 'TimeoutError' ? 'timeout' : error.message}`);
+    throw new Error(`Rocket.Chat request failed: ${error.name === 'AbortError' || error.name === 'TimeoutError' ? 'timeout' : sanitizeError(error.message, url)}`);
   }
   const raw = await response.text();
   let payload = null;
   try { payload = raw ? JSON.parse(raw) : null; } catch { /* A successful non-JSON response is acceptable. */ }
   if (!response.ok || payload?.success === false) {
-    const detail = String(payload?.error ?? payload?.message ?? `HTTP ${response.status}`).slice(0, 200);
+    const detail = sanitizeError(payload?.error ?? payload?.message ?? `HTTP ${response.status}`, url);
     throw new Error(`Rocket.Chat rejected message: ${detail}`);
   }
   return payload;
@@ -133,6 +144,7 @@ function parseArgs(argv) {
   }
   if (!options.repo && !options.testWebhook) throw new Error('Missing --repo');
   if (!options.stateFile && !options.testWebhook) throw new Error('Missing --state-file');
+  if (options.dryRun && options.initBaseline) throw new Error('--dry-run and --init-baseline cannot be combined');
   return options;
 }
 
@@ -157,13 +169,18 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
   const state = await readState(options.stateFile);
   const nextState = { schemaVersion: 1, lastSuccessfulCommit: head, updatedAt: new Date().toISOString() };
 
+  if (options.dryRun && state === null) {
+    deps.log(`Dry run has no prior baseline; current upstream is ${head.slice(0, 7)}`);
+    return { mode: 'dry-run', commit: head, changes: 0, messages: 0 };
+  }
+
   if (options.initBaseline || state === null) {
     await writeStateAtomic(options.stateFile, nextState);
     deps.log(`Baseline set to ${head.slice(0, 7)}`);
     return { mode: 'baseline-created', commit: head };
   }
 
-  const changes = await deps.collectChanges({ repo: options.repo, fromCommit: state.lastSuccessfulCommit, toCommit: 'upstream/main' });
+  const changes = await deps.collectChanges({ repo: options.repo, fromCommit: state.lastSuccessfulCommit, toCommit: head });
   const messages = buildMessages(changes, { commit: head, repositoryUrl: REPOSITORY_URL });
   if (options.dryRun) {
     messages.forEach((message) => deps.log(message));
