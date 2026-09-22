@@ -37,12 +37,14 @@ export function parseWeekly(markdown, sourcePath) {
     };
   });
 
-  return {
+  const weekly = {
     issue: pathMatch[1],
     title: normalizeTitle(headingMatch[1]),
     sourcePath,
     entries,
   };
+  Object.defineProperty(weekly, 'markdown', { value: normalized, enumerable: false });
+  return weekly;
 }
 
 export function classifyChangedPaths(nameStatusText) {
@@ -94,12 +96,17 @@ function toChange(kind, entry, weekly) {
     title: entry.title,
     summary: entry.summary,
     url: entry.url,
+    document: weekly.markdown,
   };
 }
 
 export function buildMessages(changes, { commit, repositoryUrl, maxLength = 6000 }) {
   if (changes.length === 0) return [];
   if (!commit || !repositoryUrl) throw new Error('commit and repositoryUrl are required');
+
+  if (changes.some((change) => change.document)) {
+    return [buildDocumentMessage(changes, commit, repositoryUrl)];
+  }
 
   const shortCommit = commit.slice(0, 7);
   const blocks = attachSourceUrls(changes, repositoryUrl).map(formatChange);
@@ -114,6 +121,30 @@ export function buildMessages(changes, { commit, repositoryUrl, maxLength = 6000
     const prefix = `【每周科技补全 · 增量更新】${index + 1}/${parts.length} · ${shortCommit}`;
     return `${prefix}\n\n${part.join('\n\n')}`;
   });
+}
+
+function buildDocumentMessage(changes, commit, repositoryUrl) {
+  const documents = new Map();
+  const deletions = [];
+  for (const change of changes) {
+    if (change.document && !documents.has(change.sourcePath)) {
+      documents.set(change.sourcePath, change);
+    } else if (change.kind === 'deleted-issue') {
+      deletions.push(change);
+    }
+  }
+
+  const sections = [];
+  for (const change of documents.values()) {
+    const label = changes.some((item) => item.sourcePath === change.sourcePath && item.kind === 'new-issue')
+      ? '新一期'
+      : '内容更新';
+    sections.push(`【${label}】\n${change.document}\n\n来源：${repositoryUrl}/blob/main/${change.sourcePath}`);
+  }
+  for (const change of deletions) {
+    sections.push(`【期数删除】第 ${change.issue} 期 · ${change.title}`);
+  }
+  return `【每周科技补全 · 增量更新】${commit.slice(0, 7)}\n\n${sections.join('\n\n---\n\n')}`;
 }
 
 function packBlocks(blocks, maxLength, assumedParts, shortCommit) {

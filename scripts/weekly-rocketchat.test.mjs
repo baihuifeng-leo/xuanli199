@@ -121,6 +121,24 @@ test('buildMessages preserves project and source URLs when shortening an oversiz
   assert.ok(message.length <= 300);
 });
 
+test('buildMessages sends a complete weekly document as one message', async () => {
+  const markdown = await readFile(new URL('../docs/118.md', import.meta.url), 'utf8');
+  const weekly = parseWeekly(markdown, 'docs/118.md');
+  const changes = weekly.entries.map((entry, index) => ({
+    kind: index === 0 ? 'new-issue' : 'added', issue: weekly.issue, issueTitle: weekly.title,
+    sourcePath: weekly.sourcePath, title: entry.title, summary: entry.summary, url: entry.url,
+    document: weekly.markdown,
+  }));
+  const messages = buildMessages(changes, {
+    commit: '4ddd5ac7a55e8584f810fb8382416e6ea4380c9c',
+    repositoryUrl: 'https://github.com/xuanli199/weekly',
+  });
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /只要把鼠标移动到屏幕的角落里/);
+  assert.match(messages[0], /## 4\.AI-Cubby/);
+  assert.match(messages[0], /https:\/\/github\.com\/miragecoa\/AI-Cubby/);
+});
+
 test('first normal run creates a baseline without messages', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'weekly-state-'));
   const stateFile = join(directory, 'state.json');

@@ -129,6 +129,7 @@ export async function collectChanges({ repo, fromCommit, toCommit = 'upstream/ma
         title: entry.title,
         summary: entry.summary,
         url: entry.url,
+        document: newDoc.markdown,
       })));
       continue;
     }
