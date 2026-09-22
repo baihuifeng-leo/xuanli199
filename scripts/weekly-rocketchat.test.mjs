@@ -209,4 +209,5 @@ test('systemd units enforce schedule, paths, and hardening', async () => {
   assert.match(service, /NoNewPrivileges=true/);
   assert.match(timer, /OnCalendar=\*-\*-\* 09:00:00 Asia\/Shanghai/);
   assert.match(timer, /Persistent=true/);
+  assert.doesNotMatch(timer, /RandomizedDelaySec/);
 });
