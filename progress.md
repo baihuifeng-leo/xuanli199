@@ -7,7 +7,8 @@
 - 当前现场：本地仓库位于 `/IQAir-Project/deliverables/xuanli199-weekly`，分支 `feature/rocketchat-daily-push`；代码与 systemd 已部署。运行时 Git clone 独立位于 `/var/lib/weekly-rocketchat/repo`，避免开发 checkout 的所有权变化影响服务；timer 每天北京时间 09:00 触发。
 - 验证结果：25 项测试通过；新增真实 `docs/118.md` 回归测试，确认完整 4 个项目及后续段落保留在同一条消息中。运行时 clone、Git 超时、真实 Git/HTTP、错误脱敏和失败不推进状态均有覆盖。VitePress 构建此前已通过。
 - 阻塞：功能无阻塞。安全加固待办：当前 Webhook 曾出现在聊天记录中，需用户在 Rocket.Chat 管理界面轮换。
-- 下一步：提交并推送修复到现有 PR，重发完整第 118 期测试；保持定时器运行。
+- 交付状态：完整正文修复已提交并推送现有 PR；第 118 期已按 1 条消息、4 个项目、1733 字符重新发送成功，手动测试未改变自动增量基线。
+- 下一步：用户验收 `#general` 的完整单消息显示；方便时轮换 Incoming Webhook token。定时器继续按北京时间每日 09:00 运行。
 
 ## 历史
 
