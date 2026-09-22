@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { createServer } from 'node:http';
 import test from 'node:test';
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { PassThrough } from 'node:stream';
 
 import {
   buildMessages,
@@ -13,7 +15,7 @@ import {
   diffWeekly,
   parseWeekly,
 } from './weekly-rocketchat-lib.mjs';
-import { collectChanges, main, postWebhook, readState, sendMessages, writeStateAtomic } from './weekly-rocketchat.mjs';
+import { collectChanges, main, postWebhook, readState, runGit, sendMessages, writeStateAtomic } from './weekly-rocketchat.mjs';
 
 const execFileAsync = promisify(execFile);
 const git = (cwd, ...args) => execFileAsync('git', args, { cwd });
@@ -238,6 +240,16 @@ test('collectChanges reads real Git additions, modifications, deletions, and ren
   } finally { await rm(repo, { recursive: true, force: true }); }
 });
 
+test('runGit terminates a command that exceeds its timeout', async () => {
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  let killed = false;
+  child.kill = () => { killed = true; child.emit('close', null, 'SIGTERM'); };
+  await assert.rejects(() => runGit(['fetch'], { spawn: () => child, timeoutMs: 5 }), /timed out/);
+  assert.equal(killed, true);
+});
+
 test('readState rejects malformed state', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'weekly-state-'));
   const stateFile = join(directory, 'state.json');
@@ -345,8 +357,10 @@ test('systemd units enforce schedule, paths, and hardening', async () => {
   const timer = await readFile(new URL('../deploy/weekly-rocketchat.timer', import.meta.url), 'utf8');
   assert.match(service, /Type=oneshot/);
   assert.match(service, /EnvironmentFile=\/etc\/weekly-rocketchat\.env/);
+  assert.match(service, /--repo \/var\/lib\/weekly-rocketchat\/repo/);
   assert.match(service, /--state-file \/var\/lib\/weekly-rocketchat\/state\.json/);
   assert.match(service, /NoNewPrivileges=true/);
+  assert.doesNotMatch(service, /ReadWritePaths=.*xuanli199-weekly\/\.git/);
   assert.match(timer, /OnCalendar=\*-\*-\* 09:00:00 Asia\/Shanghai/);
   assert.match(timer, /Persistent=true/);
   assert.doesNotMatch(timer, /RandomizedDelaySec/);

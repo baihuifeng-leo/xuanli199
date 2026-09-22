@@ -9,11 +9,10 @@ User=weekly-rocketchat
 Group=weekly-rocketchat
 WorkingDirectory=/IQAir-Project/deliverables/xuanli199-weekly
 EnvironmentFile=/etc/weekly-rocketchat.env
-ExecStart=/usr/bin/node /IQAir-Project/deliverables/xuanli199-weekly/scripts/weekly-rocketchat.mjs --repo /IQAir-Project/deliverables/xuanli199-weekly --state-file /var/lib/weekly-rocketchat/state.json
+ExecStart=/usr/bin/node /IQAir-Project/deliverables/xuanli199-weekly/scripts/weekly-rocketchat.mjs --repo /var/lib/weekly-rocketchat/repo --state-file /var/lib/weekly-rocketchat/state.json
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/IQAir-Project/deliverables/xuanli199-weekly/.git /var/lib/weekly-rocketchat
-
+ReadWritePaths=/var/lib/weekly-rocketchat

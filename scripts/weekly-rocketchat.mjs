@@ -51,15 +51,25 @@ export async function sendMessages(messages, { url = process.env.ROCKETCHAT_WEBH
   for (const message of messages) await post(url, message);
 }
 
-export async function runGit(args, { cwd, spawn = nodeSpawn, allowFailure = false } = {}) {
+export async function runGit(args, { cwd, spawn = nodeSpawn, allowFailure = false, timeoutMs = 60_000 } = {}) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+    }, timeoutMs);
     child.stdout.on('data', (chunk) => { stdout += chunk; });
     child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.on('error', reject);
+    child.on('error', (error) => { clearTimeout(timer); reject(error); });
     child.on('close', (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(new Error(`git ${args[0]} timed out after ${timeoutMs}ms`));
+        return;
+      }
       if (code === 0 || allowFailure) resolvePromise({ code, stdout, stderr });
       else reject(new Error(`git ${args[0]} failed (${code}): ${stderr.trim().slice(0, 300)}`));
     });

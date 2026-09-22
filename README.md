@@ -14,10 +14,11 @@ ROCKETCHAT_WEBHOOK_URL=https://chat.example.com/hooks/INTEGRATION_ID/TOKEN
 ```
 
 推荐以专用系统用户运行，状态目录为 `/var/lib/weekly-rocketchat`。安装前确认 `command -v node` 为
-`/usr/bin/node`，然后复制 `deploy/weekly-rocketchat.{service,timer}` 到 `/etc/systemd/system/`。首次部署：
+`/usr/bin/node`，并把公开上游克隆到 `/var/lib/weekly-rocketchat/repo`，与开发 checkout 隔离。然后复制
+`deploy/weekly-rocketchat.{service,timer}` 到 `/etc/systemd/system/`。首次部署：
 
 ```sh
-node scripts/weekly-rocketchat.mjs --repo "$PWD" --state-file /var/lib/weekly-rocketchat/state.json --init-baseline
+node scripts/weekly-rocketchat.mjs --repo /var/lib/weekly-rocketchat/repo --state-file /var/lib/weekly-rocketchat/state.json --init-baseline
 node scripts/weekly-rocketchat.mjs --test-webhook
 systemctl daemon-reload
 systemctl enable --now weekly-rocketchat.timer
@@ -28,7 +29,7 @@ systemctl list-timers weekly-rocketchat.timer --all
 `journalctl -u weekly-rocketchat.service`。预览增量但不发送、不推进状态：
 
 ```sh
-node scripts/weekly-rocketchat.mjs --repo "$PWD" --state-file /var/lib/weekly-rocketchat/state.json --dry-run
+node scripts/weekly-rocketchat.mjs --repo /var/lib/weekly-rocketchat/repo --state-file /var/lib/weekly-rocketchat/state.json --dry-run
 ```
 
 轮换 Webhook 时只替换 env 文件并重新运行 `--test-webhook`。卸载时先执行
