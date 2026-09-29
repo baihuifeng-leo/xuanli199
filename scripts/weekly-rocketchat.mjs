@@ -10,6 +10,7 @@ import {
   diffWeekly,
   parseWeekly,
 } from './weekly-rocketchat-lib.mjs';
+import { runTrendingFallback } from './github-trending.mjs';
 
 const REPOSITORY_URL = 'https://github.com/xuanli199/weekly';
 
@@ -144,10 +145,10 @@ function parseArgs(argv) {
   const options = { dryRun: false, initBaseline: false, testWebhook: false };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
-    if (value === '--repo' || value === '--state-file') {
+    if (value === '--repo' || value === '--state-file' || value === '--trending-state-file') {
       const next = argv[++index];
       if (!next) throw new Error(`Missing value for ${value}`);
-      options[value === '--repo' ? 'repo' : 'stateFile'] = resolve(next);
+      options[{ '--repo': 'repo', '--state-file': 'stateFile', '--trending-state-file': 'trendingStateFile' }[value]] = resolve(next);
     } else if (value === '--dry-run') options.dryRun = true;
     else if (value === '--init-baseline') options.initBaseline = true;
     else if (value === '--test-webhook') options.testWebhook = true;
@@ -164,8 +165,20 @@ const productionDeps = {
   resolveHead: async (repo) => (await runGit(['rev-parse', 'upstream/main'], { cwd: repo })).stdout.trim(),
   collectChanges,
   sendMessages,
+  runTrendingFallback,
   log: console.log,
 };
+
+async function runTrending(options, deps, dryRun) {
+  if (!options.trendingStateFile) return null;
+  return deps.runTrendingFallback({
+    stateFile: options.trendingStateFile,
+    send: deps.sendMessages,
+    writeState: writeStateAtomic,
+    dryRun,
+    log: deps.log,
+  });
+}
 
 export async function main(argv = process.argv.slice(2), dependencies = {}) {
   const deps = { ...productionDeps, ...dependencies };
@@ -195,12 +208,15 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
   const messages = buildMessages(changes, { commit: head, repositoryUrl: REPOSITORY_URL });
   if (options.dryRun) {
     messages.forEach((message) => deps.log(message));
-    return { mode: 'dry-run', commit: head, changes: changes.length, messages: messages.length };
+    const trending = messages.length === 0 ? await runTrending(options, deps, true) : null;
+    return { mode: 'dry-run', commit: head, changes: changes.length, messages: messages.length, trending };
   }
   if (messages.length > 0) await deps.sendMessages(messages);
   await writeStateAtomic(options.stateFile, nextState);
   deps.log(`Processed ${head.slice(0, 7)}: ${changes.length} changes, ${messages.length} messages`);
-  return { mode: 'processed', commit: head, changes: changes.length, messages: messages.length };
+  // 周刊状态已先落盘；补位推送失败只影响退出码，不回滚周刊进度。
+  const trending = messages.length === 0 ? await runTrending(options, deps, false) : null;
+  return { mode: 'processed', commit: head, changes: changes.length, messages: messages.length, trending };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

@@ -377,6 +377,7 @@ test('systemd units enforce schedule, paths, and hardening', async () => {
   assert.match(service, /EnvironmentFile=\/etc\/weekly-rocketchat\.env/);
   assert.match(service, /--repo \/var\/lib\/weekly-rocketchat\/repo/);
   assert.match(service, /--state-file \/var\/lib\/weekly-rocketchat\/state\.json/);
+  assert.match(service, /--trending-state-file \/var\/lib\/weekly-rocketchat\/trending-state\.json/);
   assert.match(service, /NoNewPrivileges=true/);
   assert.doesNotMatch(service, /ReadWritePaths=.*xuanli199-weekly\/\.git/);
   assert.match(timer, /OnCalendar=\*-\*-\* 09:00:00 Asia\/Shanghai/);

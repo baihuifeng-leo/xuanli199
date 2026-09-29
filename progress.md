@@ -1,14 +1,15 @@
 # 当前进度记录
 
-- 更新时间：2026-09-22
-- 更新者：Codex
-- 当前目标：每天北京时间 09:00 检查 `xuanli199/weekly` 上游增量，有新一期或内容修订时以单条消息完整推送到内网 Rocket.Chat `#general`。
-- 已确认要求：运行在当前可访问 Rocket.Chat 的 Linux 服务器；无更新时静默；首次运行不补发历史 118 期；代码跟随 fork，运行时状态和 Webhook 密钥留在仓库外。
-- 当前现场：本地仓库位于 `/IQAir-Project/deliverables/xuanli199-weekly`，分支 `feature/rocketchat-daily-push`；代码与 systemd 已部署。运行时 Git clone 独立位于 `/var/lib/weekly-rocketchat/repo`，避免开发 checkout 的所有权变化影响服务；timer 每天北京时间 09:00 触发。
-- 验证结果：25 项测试通过；新增真实 `docs/118.md` 回归测试，确认完整 4 个项目及后续段落保留在同一条消息中。运行时 clone、Git 超时、真实 Git/HTTP、错误脱敏和失败不推进状态均有覆盖。VitePress 构建此前已通过。
-- 阻塞：功能无阻塞。安全加固待办：当前 Webhook 曾出现在聊天记录中，需用户在 Rocket.Chat 管理界面轮换。
-- 交付状态：完整正文修复已提交并推送现有 PR；第 118 期已按 1 条消息、4 个项目、1733 字符重新发送成功，手动测试未改变自动增量基线。
-- 下一步：用户验收 `#general` 的完整单消息显示；方便时轮换 Incoming Webhook token。定时器继续按北京时间每日 09:00 运行。
+- 更新时间：2026-09-29
+- 更新者：Claude Code
+- 当前目标：每天北京时间 09:00 检查 `xuanli199/weekly`。有更新就推玄离；**无更新时改推「GitHub 今日热点」补位**，推到 Rocket.Chat `#general`。
+- 背景：用户反馈「收不到每日推送」。排查结果是服务正常，上游自 2026-09-11 起没有新提交，按设计静默不推。
+- 已确认要求：只在玄离无更新时推热点；项目简介翻译成中文；翻译走中转站 `https://www.cun.ai/v1`（OpenAI 兼容），模型 `deepseek-v4-flash`。
+- 实现：新增 `scripts/github-trending.mjs`，数据源是 aneasystone/github-trending README 的「All language」段落（首次上榜项目 + 日期）。取近 3 天、尚未推过的项目，最多 10 条，合成 1 条消息；全部推过就静默。已推 URL 记在 `/var/lib/weekly-rocketchat/trending-state.json`，只保留最近 1000 条。翻译失败时退回英文，推送失败时不写状态。主脚本新增 `--trending-state-file` 参数，不传就不启用补位；玄离的状态先落盘，补位失败只影响退出码。
+- 部署：AI 配置（`AI_API_*`、`AI_MODEL`）已追加到 `/etc/weekly-rocketchat.env`（root 600，不进仓库）；新的 service unit 已复制到 `/etc/systemd/system`，并已 daemon-reload。
+- 验证：36 项测试通过（原 25 项 + 新 11 项）。以服务用户身份做了真实 dry-run，抓取、翻译、成稿均正常，dry-run 不写状态。
+- 未完成：还没有真实推送过，首次真实推送在下一次定时触发时（北京时间 2026-09-30 09:00）；改动未提交 git（分支 `feature/rocketchat-daily-push`）。安全待办：Webhook 和中转站 API key 都在聊天里出现过，建议轮换，轮换后更新 env 文件即可。
+- 下一步：用户确认明早推送效果；需要时提交并推送到现有 PR。
 
 ## 历史
 
