@@ -6,6 +6,9 @@ import { join } from 'node:path';
 
 import {
   buildTrendingMessage,
+  fetchRepoStats,
+  formatDayLabel,
+  formatStars,
   parseTrending,
   runTrendingFallback,
   selectFresh,
@@ -80,15 +83,37 @@ test('translateDescriptions rejects a mismatched response', async () => {
   await assert.rejects(() => translateDescriptions(parseTrending(readme).slice(0, 2), { env, fetchImpl }), /unexpected shape/);
 });
 
-test('buildTrendingMessage prefers Chinese descriptions', () => {
+test('buildTrendingMessage renders one card per project with stars and language', () => {
   const message = buildTrendingMessage([
-    { name: 'a/b', url: 'https://github.com/a/b', description: 'English', descriptionZh: '中文' },
+    { name: 'a/b', url: 'https://github.com/a/b', description: 'English', descriptionZh: '中文', stars: 12345, language: 'Rust' },
     { name: 'c/d', url: 'https://github.com/c/d', description: 'Only English' },
   ], { date: '2026-09-29' });
-  assert.match(message, /^【GitHub 今日热点】2026-09-29/);
-  assert.match(message, /1\. \*\*a\/b\*\*\n中文\nhttps:\/\/github\.com\/a\/b/);
-  assert.match(message, /Only English/);
-  assert.doesNotMatch(message, /English\nhttps:\/\/github\.com\/a\/b/);
+  assert.match(message.text, /^\*\*🔥 GitHub 今日热点\*\* · 9月29日 周二/);
+  assert.equal(message.attachments.length, 2);
+  assert.deepEqual(message.attachments[0], {
+    color: '#2da44e',
+    title: '1. a/b',
+    title_link: 'https://github.com/a/b',
+    text: '⭐ 12k  ·  Rust\n中文',
+  });
+  assert.equal(message.attachments[1].text, 'Only English');
+});
+
+test('formatStars and formatDayLabel', () => {
+  assert.equal(formatStars(999), '999');
+  assert.equal(formatStars(1234), '1.2k');
+  assert.equal(formatStars(2000), '2k');
+  assert.equal(formatStars(56789), '57k');
+  assert.equal(formatStars(undefined), '');
+  assert.equal(formatDayLabel('2026-10-04'), '10月4日 周日');
+});
+
+test('fetchRepoStats keeps entries whose lookup fails', async () => {
+  const fetchImpl = async (url) => (url.endsWith('/a/b')
+    ? new Response(JSON.stringify({ stargazers_count: 42, language: 'Go' }))
+    : new Response('{}', { status: 403 }));
+  const result = await fetchRepoStats([{ name: 'a/b' }, { name: 'c/d' }], { fetchImpl });
+  assert.deepEqual(result, [{ name: 'a/b', stars: 42, language: 'Go' }, { name: 'c/d' }]);
 });
 
 test('runTrendingFallback pushes once, records URLs, then stays silent', async () => {
@@ -103,13 +128,18 @@ test('runTrendingFallback pushes once, records URLs, then stays silent', async (
       now,
       fetchMarkdown: async () => readme,
       translate: async (entries) => entries,
+      fetchStats: async (entries) => entries,
       log: () => {},
     };
     assert.deepEqual(await runTrendingFallback(options), { messages: 1, projects: 3 });
     assert.equal(sent.length, 1);
     const state = JSON.parse(await readFile(stateFile, 'utf8'));
     assert.equal(state.pushedUrls.length, 3);
-    assert.deepEqual(await runTrendingFallback(options), { messages: 0, projects: 0 });
+    assert.equal(state.lastPushedDate, '2026-09-29');
+    // 同一天的第二次运行（11:00 补推）不再推热点
+    assert.deepEqual(await runTrendingFallback({ ...options, fetchMarkdown: async () => readme.replace('## Java', '* 【2026-09-29】[new / one](https://github.com/new/one) - New\n\n## Java') }), { messages: 0, projects: 0 });
+    // 次日已推过的项目不再重复，全部推过则静默
+    assert.deepEqual(await runTrendingFallback({ ...options, now: new Date('2026-09-30T01:00:00Z') }), { messages: 0, projects: 0 });
     assert.equal(sent.length, 1);
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -127,9 +157,10 @@ test('runTrendingFallback falls back to English when translation fails', async (
       now,
       fetchMarkdown: async () => readme,
       translate: async () => { throw new Error('boom'); },
+      fetchStats: async (entries) => entries,
       log: () => {},
     });
-    assert.match(sent[0], /TypeScript-to-Native Compiler/);
+    assert.ok(sent[0].attachments.some((card) => card.text === 'TypeScript-to-Native Compiler'));
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -146,6 +177,7 @@ test('runTrendingFallback does not send or record state on delivery failure', as
       now,
       fetchMarkdown: async () => readme,
       translate: async (entries) => entries,
+      fetchStats: async (entries) => entries,
       log: () => {},
     }), /down/);
     await assert.rejects(() => readFile(stateFile), { code: 'ENOENT' });

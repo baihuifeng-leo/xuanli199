@@ -10,6 +10,7 @@ import {
   diffWeekly,
   parseWeekly,
 } from './weekly-rocketchat-lib.mjs';
+import { runDailyNews } from './daily-news.mjs';
 import { runTrendingFallback } from './github-trending.mjs';
 
 const REPOSITORY_URL = 'https://github.com/xuanli199/weekly';
@@ -32,7 +33,8 @@ export async function postWebhook(url, text, { fetchImpl = fetch, timeoutMs = 15
     response = await fetchImpl(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text }),
+      // 字符串按纯文本发送；对象按 Rocket.Chat 消息体（text + attachments）原样发送。
+      body: JSON.stringify(typeof text === 'string' ? { text } : text),
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
@@ -145,10 +147,10 @@ function parseArgs(argv) {
   const options = { dryRun: false, initBaseline: false, testWebhook: false };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
-    if (value === '--repo' || value === '--state-file' || value === '--trending-state-file') {
+    if (value === '--repo' || value === '--state-file' || value === '--trending-state-file' || value === '--news-state-file') {
       const next = argv[++index];
       if (!next) throw new Error(`Missing value for ${value}`);
-      options[{ '--repo': 'repo', '--state-file': 'stateFile', '--trending-state-file': 'trendingStateFile' }[value]] = resolve(next);
+      options[{ '--repo': 'repo', '--state-file': 'stateFile', '--trending-state-file': 'trendingStateFile', '--news-state-file': 'newsStateFile' }[value]] = resolve(next);
     } else if (value === '--dry-run') options.dryRun = true;
     else if (value === '--init-baseline') options.initBaseline = true;
     else if (value === '--test-webhook') options.testWebhook = true;
@@ -166,6 +168,7 @@ const productionDeps = {
   collectChanges,
   sendMessages,
   runTrendingFallback,
+  runDailyNews,
   log: console.log,
 };
 
@@ -173,6 +176,17 @@ async function runTrending(options, deps, dryRun) {
   if (!options.trendingStateFile) return null;
   return deps.runTrendingFallback({
     stateFile: options.trendingStateFile,
+    send: deps.sendMessages,
+    writeState: writeStateAtomic,
+    dryRun,
+    log: deps.log,
+  });
+}
+
+async function runNews(options, deps, dryRun) {
+  if (!options.newsStateFile) return null;
+  return deps.runDailyNews({
+    stateFile: options.newsStateFile,
     send: deps.sendMessages,
     writeState: writeStateAtomic,
     dryRun,
@@ -188,6 +202,23 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
     deps.log('Rocket.Chat test message sent');
     return { mode: 'test-webhook' };
   }
+  // 今日新闻独立于周刊：先推，失败不阻塞周刊与热点，最后再以非零退出码暴露。
+  let news = null;
+  let newsError = null;
+  if (!options.initBaseline) {
+    try {
+      news = await runNews(options, deps, options.dryRun);
+    } catch (error) {
+      newsError = error;
+      deps.log(`News failed: ${String(error.message).slice(0, 200)}`);
+    }
+  }
+  const result = await runWeekly(options, deps);
+  if (newsError) throw newsError;
+  return { ...result, news };
+}
+
+async function runWeekly(options, deps) {
   await deps.fetchUpstream(options.repo);
   const head = await deps.resolveHead(options.repo);
   const state = await readState(options.stateFile);

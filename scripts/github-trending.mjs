@@ -1,7 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
 export const TRENDING_SOURCE_URL = 'https://raw.githubusercontent.com/aneasystone/github-trending/master/README.md';
-const TRENDING_REPOSITORY_URL = 'https://github.com/aneasystone/github-trending';
 const PUSHED_HISTORY_LIMIT = 1000;
 
 // aneasystone/github-trending 在 "## All language" 下按首次上榜日期记录项目：
@@ -72,16 +71,52 @@ export async function translateDescriptions(entries, {
   return entries.map((entry) => (byUrl.has(entry.url) ? { ...entry, descriptionZh: byUrl.get(entry.url) } : entry));
 }
 
+const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+export function beijingDate(now) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(now);
+}
+
+// "2026-09-29" -> "9月29日 周二"
+export function formatDayLabel(isoDate) {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  return `${month}月${day}日 ${WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()]}`;
+}
+
+export function formatStars(count) {
+  if (!Number.isFinite(count)) return '';
+  if (count < 1000) return String(count);
+  return `${(count / 1000).toFixed(count < 10_000 ? 1 : 0).replace(/\.0$/, '')}k`;
+}
+
+export async function fetchRepoStats(entries, { fetchImpl = fetch, timeoutMs = 15_000 } = {}) {
+  const results = await Promise.allSettled(entries.map(async (entry) => {
+    const response = await fetchImpl(`https://api.github.com/repos/${entry.name}`, {
+      headers: { accept: 'application/vnd.github+json', 'user-agent': 'weekly-rocketchat' },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const repo = await response.json();
+    return { stars: repo.stargazers_count, language: repo.language ?? '' };
+  }));
+  return entries.map((entry, index) => (results[index].status === 'fulfilled' ? { ...entry, ...results[index].value } : entry));
+}
+
+// Rocket.Chat 卡片：每个项目一张 attachment，标题可点击，首行是星标与语言。
 export function buildTrendingMessage(entries, { date }) {
-  const lines = [`【GitHub 今日热点】${date}`, '玄离周刊今日无更新，以下是 GitHub Trending 新上榜项目：', ''];
-  entries.forEach((entry, index) => {
-    lines.push(`${index + 1}. **${entry.name}**`);
-    const description = entry.descriptionZh || entry.description;
-    if (description) lines.push(description);
-    lines.push(entry.url, '');
-  });
-  lines.push(`来源：GitHub Trending（${TRENDING_REPOSITORY_URL}）`);
-  return lines.join('\n');
+  return {
+    text: `**🔥 GitHub 今日热点** · ${formatDayLabel(date)}\n玄离周刊今日无更新，精选 ${entries.length} 个 GitHub Trending 新上榜项目`,
+    attachments: entries.map((entry, index) => {
+      const meta = [Number.isFinite(entry.stars) ? `⭐ ${formatStars(entry.stars)}` : '', entry.language].filter(Boolean).join('  ·  ');
+      const description = entry.descriptionZh || entry.description;
+      return {
+        color: '#2da44e',
+        title: `${index + 1}. ${entry.name}`,
+        title_link: entry.url,
+        text: [meta, description].filter(Boolean).join('\n'),
+      };
+    }),
+  };
 }
 
 export async function readTrendingState(path) {
@@ -113,9 +148,16 @@ export async function runTrendingFallback({
   now = new Date(),
   fetchMarkdown = fetchTrendingMarkdown,
   translate = translateDescriptions,
+  fetchStats = fetchRepoStats,
   log = console.log,
 }) {
   const state = await readTrendingState(stateFile);
+  const date = beijingDate(now);
+  // 定时器一天会跑两次（09:00 与补推的 11:00），热点每天只推一次。
+  if (state.lastPushedDate === date) {
+    log('Trending: already pushed today');
+    return { messages: 0, projects: 0 };
+  }
   const fresh = selectFresh(parseTrending(await fetchMarkdown()), state.pushedUrls, { now });
   if (fresh.length === 0) {
     log('Trending: no new projects');
@@ -127,15 +169,15 @@ export async function runTrendingFallback({
   } catch (error) {
     log(`Trending: translation skipped (${String(error.message).slice(0, 120)})`);
   }
-  const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(now);
+  entries = await fetchStats(entries);
   const message = buildTrendingMessage(entries, { date });
   if (dryRun) {
-    log(message);
+    log(JSON.stringify(message, null, 2));
     return { messages: 1, projects: entries.length };
   }
   await send([message]);
   const pushedUrls = [...state.pushedUrls, ...fresh.map((entry) => entry.url)].slice(-PUSHED_HISTORY_LIMIT);
-  await writeState(stateFile, { schemaVersion: 1, pushedUrls, updatedAt: now.toISOString() });
+  await writeState(stateFile, { schemaVersion: 1, pushedUrls, lastPushedDate: date, updatedAt: now.toISOString() });
   log(`Trending: pushed ${entries.length} projects`);
   return { messages: 1, projects: entries.length };
 }

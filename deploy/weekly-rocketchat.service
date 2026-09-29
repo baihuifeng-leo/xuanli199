@@ -1,5 +1,5 @@
 [Unit]
-Description=Push xuanli199 weekly updates to Rocket.Chat
+Description=Push daily news and xuanli199 weekly updates (or GitHub trending) to Rocket.Chat
 Wants=network-online.target
 After=network-online.target
 
@@ -9,7 +9,7 @@ User=weekly-rocketchat
 Group=weekly-rocketchat
 WorkingDirectory=/IQAir-Project/deliverables/xuanli199-weekly
 EnvironmentFile=/etc/weekly-rocketchat.env
-ExecStart=/usr/bin/node /IQAir-Project/deliverables/xuanli199-weekly/scripts/weekly-rocketchat.mjs --repo /var/lib/weekly-rocketchat/repo --state-file /var/lib/weekly-rocketchat/state.json --trending-state-file /var/lib/weekly-rocketchat/trending-state.json
+ExecStart=/usr/bin/node /IQAir-Project/deliverables/xuanli199-weekly/scripts/weekly-rocketchat.mjs --repo /var/lib/weekly-rocketchat/repo --state-file /var/lib/weekly-rocketchat/state.json --trending-state-file /var/lib/weekly-rocketchat/trending-state.json --news-state-file /var/lib/weekly-rocketchat/news-state.json
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
