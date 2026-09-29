@@ -1,0 +1,18 @@
+[Unit]
+Description=Push xuanli199 weekly updates to Rocket.Chat
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=weekly-rocketchat
+Group=weekly-rocketchat
+WorkingDirectory=/IQAir-Project/deliverables/xuanli199-weekly
+EnvironmentFile=/etc/weekly-rocketchat.env
+ExecStart=/usr/bin/node /IQAir-Project/deliverables/xuanli199-weekly/scripts/weekly-rocketchat.mjs --repo /var/lib/weekly-rocketchat/repo --state-file /var/lib/weekly-rocketchat/state.json --trending-state-file /var/lib/weekly-rocketchat/trending-state.json
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/weekly-rocketchat

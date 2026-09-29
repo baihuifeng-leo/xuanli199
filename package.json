@@ -4,11 +4,13 @@
   "scripts": {
     "dev": "vitepress dev",
     "build": "vitepress build",
-    "serve": "vitepress serve"
+    "serve": "vitepress serve",
+    "test:rocketchat": "node --test scripts/weekly-rocketchat.test.mjs scripts/github-trending.test.mjs"
   },
   "devDependencies": {
     "vitepress": "1.6.4",
-    "vitepress-plugin-rss": "0.3.1"
+    "vitepress-plugin-rss": "0.3.1",
+    "vue": "^3.5.21"
   },
   "packageManager": "pnpm@10.15.1",
   "pnpm": {
