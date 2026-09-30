@@ -1,19 +1,20 @@
 # 当前进度记录
 
-- 更新时间：2026-09-29
+- 更新时间：2026-09-30
 - 更新者：Claude Code
-- 当前目标：每天北京时间 09:00（11:00 补推）往 Rocket.Chat `#general` 推送：① 今日热点新闻（每天）；② 玄离周刊有更新就推玄离，无更新就推 GitHub 今日热点。
-- 已确认要求：消息排版要美观（用 Rocket.Chat attachments 卡片）；科技热点标出星标数；热点只在玄离无更新时推；简介经中转站 `https://www.cun.ai/v1`（OpenAI 兼容）用 `deepseek-v4-flash` 翻译；新闻源用 vikiboss/60s（MIT），读的是它在 GitHub 上的静态数据仓库 `60s-static-host`（公开 API 被 Cloudflare 拦了这台 IP）。
-- 已完成（2026-09-29）：
-  - `scripts/daily-news.mjs` 新闻卡片（15 条 + 微语），状态文件 `/var/lib/weekly-rocketchat/news-state.json`，每天推一次；数据未发布时静默，等 11:00 补推。
-  - `scripts/github-trending.mjs` 改成卡片，每个项目显示「⭐ 星标 · 语言」（走 GitHub API）；状态里加了 `lastPushedDate`，每天只推一次。
-  - 主脚本先推新闻，再跑周刊和热点；新闻失败不阻塞周刊，最后以非零退出码暴露。timer 增加 11:00；unit 已安装、daemon-reload 并重启 timer。
-  - 43 项测试通过；dry-run 渲染正常。
-  - 意外情况：重启 timer 时 Persistent 补跑了一次，真实推送了当天的新闻卡片（09:36 UTC）。热点因为没有新项目，没有推送。
-  - 代码：前一轮已提交 `0ed19c0`，经 PR #1 合并到 main；本轮已提交并推到 main。
-- 通知 debug 结论：Rocket.Chat 在 192.168.2.5（docker `rocketchat-rocketchat-1`，API 端口 3010，版本 8.7）。两个 incoming webhook（`xuanli199` 推 #general、`BOT-EC Daily Report` 推 #DailyReport）都以 **Leo.Bai 本人帐号** 发送，而 Rocket.Chat 不会把自己发的消息通知给自己，这就是 PC 和手机都没有通知的原因。Push gateway、默认通知偏好（all）、房间人数上限（100 > 8）都正常。集成配置已备份到 192.168.2.5:`/root/rc-backup/integrations-20260929.json`。
-- 通知已修复：用户在后台新建了 `daily.bot`（bot 角色），两个 webhook 都改成以它发布；2026-09-29 发了测试消息，发送者是 daily.bot，用户确认 PC 和手机都收到通知。
-- 下一步：无。每天 09:00 推新闻 + 玄离/热点（11:00 补推）。待办：轮换 Webhook 与中转站 API key（都曾出现在聊天里）。
+- 当前目标：每天北京时间 **08:00** 往 Rocket.Chat `#general` 推 **3 条**，按顺序：① 📰 今日热点新闻（60s）；② 🌐 BBC 国际新闻（AI 翻译）；③ 科技：玄离周刊有更新推 📚 玄离，否则推 🔥 Hacker News 今日热点（AI 翻译）。10:00 补推当天漏掉的。发送者是 `daily.bot`。**所有推送统一用卡片排版**（彩色色条、emoji 标题、加粗层次）；**标题和说明放在第一张卡片，消息正文 text 留空**。原因是用户的客户端把 text 画在卡片下方；用户已确认接受代价：通知预览没有内容，只显示 daily.bot 和频道。
+- 用户要求（2026-09-30，按时间顺序）：推送改到 08:00；修复收不到科技；新闻排版要美化；新增 BBC News 作为第 3 条；科技补位的数据源从 GitHub 热点换成 Hacker News（API 翻译），「有玄离推玄离」的逻辑不变；所有推送保持同样的美化排版。
+- 本轮改动（未提交，工作区在本地 main）：
+  - `scripts/hacker-news.mjs`：官方 Firebase API，取首页前 30 条，挑出 7 天内没推过的前 10 条，按分数排序，前三名加奖牌。每条抓文章页的 og/meta description 作为原文简介；大模型翻译标题，并据简介写一句中文导读；**没有简介时导读留空，不让模型编造**。卡片显示「▲ 分数 💬 评论 🌐 域名」和「查看 HN 讨论」链接。翻译失败时推英文原文。状态文件 `hn-state.json`（按 story id 去重）。
+  - 删除 `github-trending.mjs` 及其测试，运行时的 `trending-state.json` 也已删除。公共格式函数抽到 `scripts/format.mjs`，翻译和分类共用 `scripts/llm.mjs`。
+  - 玄离改成卡片：每期一条消息，头部是期号、日期范围和 GitHub 原文链接；每个项目一张紫色卡片（keycap 编号，标题链到项目）。正文**完整保留**，句子合并成段；末尾的「名称 + 链接」段落改成可点击链接，只有一个且与标题链接重复时省略。仍然用 `docs/118.md` 做真实回归测试。
+  - BBC 编号改成 keycap；新闻（分类卡片 + 小标题）、BBC（`bbc-news.mjs`）沿用本日前述实现。
+  - service 改用 `--hn-state-file`，已安装并 daemon-reload；timer 为 08:00/10:00。
+- 标题置顶（`format.mjs` 的 `withHeaderCard`）已应用到新闻、BBC、HN、玄离四种消息。9/30 在 #general 发过一条测试（text 为空、标题卡在前），Rocket.Chat 正常接受，入库 `msg: ''`。
+- 验证：49 项测试通过；HN 用真实数据 dry-run 正常（约 18 秒，部分站点取不到简介，就只显示标题和数据）；玄离用 116–118 期本地渲染检查过。
+- 预期：9/30 10:00 的定时运行会推 BBC 和 Hacker News 两条（新闻今天已推过旧版，会跳过）；10/1 08:00 起每天 3 条都是新版。
+- 下一步：用户验收后，提交并推到 main。
+- 待办（用户表示暂不处理，不必再提醒）：轮换 Webhook 和中转站 API key。
 
 ## 历史
 

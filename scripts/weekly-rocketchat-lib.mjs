@@ -1,3 +1,5 @@
+import { KEYCAPS, withHeaderCard } from './format.mjs';
+
 const WEEKLY_PATH = /^docs\/(\d+)\.md$/;
 const URL_PATTERN = /https?:\/\/[^\s<>()]+/g;
 
@@ -105,7 +107,7 @@ export function buildMessages(changes, { commit, repositoryUrl, maxLength = 6000
   if (!commit || !repositoryUrl) throw new Error('commit and repositoryUrl are required');
 
   if (changes.some((change) => change.document)) {
-    return [buildDocumentMessage(changes, commit, repositoryUrl)];
+    return buildDocumentMessages(changes, commit, repositoryUrl);
   }
 
   const shortCommit = commit.slice(0, 7);
@@ -123,7 +125,51 @@ export function buildMessages(changes, { commit, repositoryUrl, maxLength = 6000
   });
 }
 
-function buildDocumentMessage(changes, commit, repositoryUrl) {
+const WEEKLY_COLOR = '#8250df';
+
+function shortLinkName(url) {
+  try {
+    const { hostname, pathname } = new URL(url);
+    const parts = pathname.split('/').filter(Boolean);
+    if (hostname === 'github.com' && parts.length >= 2) return parts[1];
+    return hostname.replace(/^www\./, '') + (parts.length ? `/${parts.at(-1)}` : '');
+  } catch {
+    return url;
+  }
+}
+
+// 周刊正文一句一行：通常句间空一行、段间空两行（没有空两行时按空一行分段）。
+// 普通段落合并成一段话；含链接的段落（通常是末尾的「名称 + 链接」列表）改成可点击链接，
+// 若只有一个链接且与卡片标题链接相同则省略。
+export function formatEntryBody(entry) {
+  const separator = /\n[ \t]*\n[ \t]*\n/.test(entry.body) ? /\n[ \t]*\n[ \t]*\n\s*/ : /\n[ \t]*\n\s*/;
+  const isUrl = (line) => /^https?:\/\/\S+$/.test(line);
+  const paragraphs = entry.body.split(separator).map((paragraph) => {
+    const lines = paragraph.split('\n').map((line) => line.trim()).filter(Boolean);
+    if (!lines.some(isUrl)) {
+      return lines.reduce((joined, line) => (!joined ? line : /[　-〿＀-￯]$/.test(joined) ? joined + line : `${joined} ${line}`), '');
+    }
+    // 链接段：一行名称后跟一个或多个链接。名称后只有一个链接时直接做成 [名称](链接)，
+    // 多个链接时写成「名称：[仓库名](链接)…」。
+    const groups = [];
+    for (const line of lines) {
+      if (!isUrl(line)) groups.push({ label: line, urls: [] });
+      else if (groups.length === 0) groups.push({ label: '', urls: [line] });
+      else groups.at(-1).urls.push(line);
+    }
+    const prose = groups.filter((group) => group.urls.length === 0).map((group) => group.label);
+    const linked = groups.filter((group) => group.urls.length > 0);
+    if (prose.length === 0 && linked.length === 1 && linked[0].urls.length === 1 && linked[0].urls[0] === entry.url) return '';
+    const rendered = linked.map((group) => (group.urls.length === 1 && group.label
+      ? `🔗 [${group.label}](${group.urls[0]})`
+      : `🔗 ${group.label ? `${group.label}：` : ''}${group.urls.map((url) => `[${shortLinkName(url)}](${url})`).join('　')}`));
+    return [...prose, ...rendered].join('\n');
+  }).filter(Boolean);
+  return paragraphs.join('\n\n');
+}
+
+// 每期一条消息：头部是期号与日期范围，每个项目一张卡片（标题链到项目地址，正文完整保留）。
+function buildDocumentMessages(changes, commit, repositoryUrl) {
   const documents = new Map();
   const deletions = [];
   for (const change of changes) {
@@ -134,17 +180,30 @@ function buildDocumentMessage(changes, commit, repositoryUrl) {
     }
   }
 
-  const sections = [];
+  const messages = [];
   for (const change of documents.values()) {
-    const label = changes.some((item) => item.sourcePath === change.sourcePath && item.kind === 'new-issue')
-      ? '新一期'
-      : '内容更新';
-    sections.push(`【${label}】\n${change.document}\n\n来源：${repositoryUrl}/blob/main/${change.sourcePath}`);
+    const isNew = changes.some((item) => item.sourcePath === change.sourcePath && item.kind === 'new-issue');
+    const weekly = parseWeekly(change.document, change.sourcePath);
+    const range = weekly.title.replace(/^【\d+】\s*/, '');
+    const sourceUrl = `${repositoryUrl}/blob/main/${change.sourcePath}`;
+    messages.push(withHeaderCard({
+      title: `📚 玄离周刊 · 第 ${weekly.issue} 期 · ${isNew ? '新一期' : '内容更新'}`,
+      description: `${range} · ${weekly.entries.length} 个项目 · [GitHub 原文](${sourceUrl})`,
+      color: WEEKLY_COLOR,
+    }, weekly.entries.map((entry, index) => ({
+      color: WEEKLY_COLOR,
+      title: `${KEYCAPS[index] ?? `${index + 1}.`} ${entry.title.replace(/^\d+\s*[.、．]\s*/, '')}`,
+      ...(entry.url ? { title_link: entry.url } : {}),
+      text: formatEntryBody(entry),
+    }))));
   }
-  for (const change of deletions) {
-    sections.push(`【期数删除】第 ${change.issue} 期 · ${change.title}`);
+  if (deletions.length > 0) {
+    messages.push(withHeaderCard(
+      { title: '📚 玄离周刊 · 期数删除', description: `上游提交 ${commit.slice(0, 7)} 删除了以下期数`, color: '#9aa0a6' },
+      deletions.map((change) => ({ color: '#9aa0a6', text: `第 ${change.issue} 期 · ${change.title}` })),
+    ));
   }
-  return `【每周科技补全 · 增量更新】${commit.slice(0, 7)}\n\n${sections.join('\n\n---\n\n')}`;
+  return messages;
 }
 
 function packBlocks(blocks, maxLength, assumedParts, shortCommit) {

@@ -134,9 +134,21 @@ test('buildMessages sends a complete weekly document as one message', async () =
     repositoryUrl: 'https://github.com/xuanli199/weekly',
   });
   assert.equal(messages.length, 1);
-  assert.match(messages[0], /只要把鼠标移动到屏幕的角落里/);
-  assert.match(messages[0], /## 4\.AI-Cubby/);
-  assert.match(messages[0], /https:\/\/github\.com\/miragecoa\/AI-Cubby/);
+  const [message] = messages;
+  assert.equal(message.text, '');
+  const [header, ...cards] = message.attachments;
+  assert.deepEqual(header, { color: '#8250df', title: '📚 玄离周刊 · 第 118 期 · 新一期', text: '2026年8月29日-2026年9月5日 · 4 个项目 · [GitHub 原文](https://github.com/xuanli199/weekly/blob/main/docs/118.md)' });
+  assert.equal(cards.length, 4);
+  assert.equal(cards[0].title, '1️⃣ convenient_window_free');
+  assert.equal(cards[0].title_link, 'https://github.com/ximizhou/convenient_window_free');
+  // 段内合并成一段话，完整保留正文；末尾「项目名（说明）+ 链接」段省略
+  assert.match(cards[0].text, /^在 Mac 上有一个叫触发角的功能，只要把鼠标移动到屏幕的角落里，就能触发各种功能。\n\n/);
+  assert.match(cards[0].text, /就能在任意位置调整它们。$/);
+  assert.equal(cards[3].title, '4️⃣ AI-Cubby');
+  assert.equal(cards[3].title_link, 'https://github.com/miragecoa/AI-Cubby');
+  const original = weekly.entries.map((entry) => entry.body.replace(/https?:\/\/\S+/g, '').replace(/\s+/g, '')).join('');
+  const rendered = cards.map((card) => card.text.replace(/\s+/g, '')).join('');
+  for (const sentence of ['DLSS5', '窗口增强中的贴边隐藏']) assert.ok(rendered.includes(sentence) && original.includes(sentence));
 });
 
 test('first normal run creates a baseline without messages', async () => {
@@ -377,12 +389,13 @@ test('systemd units enforce schedule, paths, and hardening', async () => {
   assert.match(service, /EnvironmentFile=\/etc\/weekly-rocketchat\.env/);
   assert.match(service, /--repo \/var\/lib\/weekly-rocketchat\/repo/);
   assert.match(service, /--state-file \/var\/lib\/weekly-rocketchat\/state\.json/);
-  assert.match(service, /--trending-state-file \/var\/lib\/weekly-rocketchat\/trending-state\.json/);
+  assert.match(service, /--hn-state-file \/var\/lib\/weekly-rocketchat\/hn-state\.json/);
   assert.match(service, /NoNewPrivileges=true/);
   assert.doesNotMatch(service, /ReadWritePaths=.*xuanli199-weekly\/\.git/);
-  assert.match(timer, /OnCalendar=\*-\*-\* 09:00:00 Asia\/Shanghai/);
-  assert.match(timer, /OnCalendar=\*-\*-\* 11:00:00 Asia\/Shanghai/);
+  assert.match(timer, /OnCalendar=\*-\*-\* 08:00:00 Asia\/Shanghai/);
+  assert.match(timer, /OnCalendar=\*-\*-\* 10:00:00 Asia\/Shanghai/);
   assert.match(service, /--news-state-file \/var\/lib\/weekly-rocketchat\/news-state\.json/);
+  assert.match(service, /--bbc-state-file \/var\/lib\/weekly-rocketchat\/bbc-state\.json/);
   assert.match(timer, /Persistent=true/);
   assert.doesNotMatch(timer, /RandomizedDelaySec/);
 });

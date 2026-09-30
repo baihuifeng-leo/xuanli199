@@ -1,10 +1,10 @@
 [Unit]
-Description=Daily Rocket.Chat push at 09:00 (catch-up at 11:00) Asia/Shanghai
+Description=Daily Rocket.Chat push at 08:00 (catch-up at 10:00) Asia/Shanghai
 
 [Timer]
-OnCalendar=*-*-* 09:00:00 Asia/Shanghai
-# 60s 新闻偶尔晚于 09:00 发布；11:00 补推，已推过的当天内容会自动跳过。
-OnCalendar=*-*-* 11:00:00 Asia/Shanghai
+OnCalendar=*-*-* 08:00:00 Asia/Shanghai
+# 60s 新闻偶尔晚于 08:00 发布；10:00 补推，已推过的当天内容会自动跳过。
+OnCalendar=*-*-* 10:00:00 Asia/Shanghai
 Persistent=true
 Unit=weekly-rocketchat.service
 

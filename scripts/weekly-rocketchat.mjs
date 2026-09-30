@@ -10,8 +10,9 @@ import {
   diffWeekly,
   parseWeekly,
 } from './weekly-rocketchat-lib.mjs';
+import { runBbcNews } from './bbc-news.mjs';
 import { runDailyNews } from './daily-news.mjs';
-import { runTrendingFallback } from './github-trending.mjs';
+import { runHackerNewsFallback } from './hacker-news.mjs';
 
 const REPOSITORY_URL = 'https://github.com/xuanli199/weekly';
 
@@ -147,10 +148,10 @@ function parseArgs(argv) {
   const options = { dryRun: false, initBaseline: false, testWebhook: false };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
-    if (value === '--repo' || value === '--state-file' || value === '--trending-state-file' || value === '--news-state-file') {
+    if (value === '--repo' || value === '--state-file' || value === '--hn-state-file' || value === '--news-state-file' || value === '--bbc-state-file') {
       const next = argv[++index];
       if (!next) throw new Error(`Missing value for ${value}`);
-      options[{ '--repo': 'repo', '--state-file': 'stateFile', '--trending-state-file': 'trendingStateFile', '--news-state-file': 'newsStateFile' }[value]] = resolve(next);
+      options[{ '--repo': 'repo', '--state-file': 'stateFile', '--hn-state-file': 'hnStateFile', '--news-state-file': 'newsStateFile', '--bbc-state-file': 'bbcStateFile' }[value]] = resolve(next);
     } else if (value === '--dry-run') options.dryRun = true;
     else if (value === '--init-baseline') options.initBaseline = true;
     else if (value === '--test-webhook') options.testWebhook = true;
@@ -167,15 +168,17 @@ const productionDeps = {
   resolveHead: async (repo) => (await runGit(['rev-parse', 'upstream/main'], { cwd: repo })).stdout.trim(),
   collectChanges,
   sendMessages,
-  runTrendingFallback,
+  runHackerNewsFallback,
   runDailyNews,
+  runBbcNews,
   log: console.log,
 };
 
-async function runTrending(options, deps, dryRun) {
-  if (!options.trendingStateFile) return null;
-  return deps.runTrendingFallback({
-    stateFile: options.trendingStateFile,
+// 玄离无更新时的科技补位：Hacker News 今日热点。
+async function runTechFallback(options, deps, dryRun) {
+  if (!options.hnStateFile) return null;
+  return deps.runHackerNewsFallback({
+    stateFile: options.hnStateFile,
     send: deps.sendMessages,
     writeState: writeStateAtomic,
     dryRun,
@@ -183,16 +186,11 @@ async function runTrending(options, deps, dryRun) {
   });
 }
 
-async function runNews(options, deps, dryRun) {
-  if (!options.newsStateFile) return null;
-  return deps.runDailyNews({
-    stateFile: options.newsStateFile,
-    send: deps.sendMessages,
-    writeState: writeStateAtomic,
-    dryRun,
-    log: deps.log,
-  });
-}
+// 每日独立推送，按此顺序发出：国内新闻、BBC 国际新闻。未传对应状态文件时不启用。
+const DAILY_FEEDS = [
+  { label: 'News', option: 'newsStateFile', run: 'runDailyNews' },
+  { label: 'BBC', option: 'bbcStateFile', run: 'runBbcNews' },
+];
 
 export async function main(argv = process.argv.slice(2), dependencies = {}) {
   const deps = { ...productionDeps, ...dependencies };
@@ -202,20 +200,29 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
     deps.log('Rocket.Chat test message sent');
     return { mode: 'test-webhook' };
   }
-  // 今日新闻独立于周刊：先推，失败不阻塞周刊与热点，最后再以非零退出码暴露。
-  let news = null;
-  let newsError = null;
+  // 每日新闻独立于周刊：先推，任何一路失败都不阻塞其他推送，最后再以非零退出码暴露。
+  const daily = {};
+  let dailyError = null;
   if (!options.initBaseline) {
-    try {
-      news = await runNews(options, deps, options.dryRun);
-    } catch (error) {
-      newsError = error;
-      deps.log(`News failed: ${String(error.message).slice(0, 200)}`);
+    for (const feed of DAILY_FEEDS) {
+      if (!options[feed.option]) continue;
+      try {
+        daily[feed.label] = await deps[feed.run]({
+          stateFile: options[feed.option],
+          send: deps.sendMessages,
+          writeState: writeStateAtomic,
+          dryRun: options.dryRun,
+          log: deps.log,
+        });
+      } catch (error) {
+        dailyError ??= error;
+        deps.log(`${feed.label} failed: ${String(error.message).slice(0, 200)}`);
+      }
     }
   }
   const result = await runWeekly(options, deps);
-  if (newsError) throw newsError;
-  return { ...result, news };
+  if (dailyError) throw dailyError;
+  return { ...result, news: daily.News ?? null, bbc: daily.BBC ?? null };
 }
 
 async function runWeekly(options, deps) {
@@ -239,15 +246,15 @@ async function runWeekly(options, deps) {
   const messages = buildMessages(changes, { commit: head, repositoryUrl: REPOSITORY_URL });
   if (options.dryRun) {
     messages.forEach((message) => deps.log(message));
-    const trending = messages.length === 0 ? await runTrending(options, deps, true) : null;
-    return { mode: 'dry-run', commit: head, changes: changes.length, messages: messages.length, trending };
+    const tech = messages.length === 0 ? await runTechFallback(options, deps, true) : null;
+    return { mode: 'dry-run', commit: head, changes: changes.length, messages: messages.length, tech };
   }
   if (messages.length > 0) await deps.sendMessages(messages);
   await writeStateAtomic(options.stateFile, nextState);
   deps.log(`Processed ${head.slice(0, 7)}: ${changes.length} changes, ${messages.length} messages`);
   // 周刊状态已先落盘；补位推送失败只影响退出码，不回滚周刊进度。
-  const trending = messages.length === 0 ? await runTrending(options, deps, false) : null;
-  return { mode: 'processed', commit: head, changes: changes.length, messages: messages.length, trending };
+  const tech = messages.length === 0 ? await runTechFallback(options, deps, false) : null;
+  return { mode: 'processed', commit: head, changes: changes.length, messages: messages.length, tech };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
